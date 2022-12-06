@@ -10,11 +10,7 @@ import Utils.sampling_schemes as sampling_schemes
 from Utils.OmeroTools import *
 from pathlib import Path
 
-
-
 #pd.set_option('display.max_rows', None)
-
-
 class DataGenerator(torch.utils.data.Dataset):
 
     def __init__(self, tile_dataset, target="tumour_label", dim = (256, 256), vis = 0, inference=False,
@@ -112,14 +108,14 @@ def SaveFileParameter(config, df, SVS_ID):
     np.save(npy_path, npy_dict)
     return npy_path
 
-def QueryFromServer(config, **kwargs):
+def QueryROI(config, **kwargs):
     print("Querying from Server")
     df   = pd.DataFrame()
     conn = connect(config['OMERO']['Host'], config['OMERO']['User'], config['OMERO']['Pw'])  ## Group not implemented yet
     conn.SERVICE_OPTS.setOmeroGroup('-1')
     
     query_base = """
-    select image.id, image.name, f2.size, shapes.textValue, shapes.points, shapes.class from 
+    select image.id, image.name, f2.size, shapes.textValue, shapes.points, shapes.class,rois.id from 
     Image as image
     left join image.fileset as fs
     left join fs.usedFiles as uf
@@ -134,8 +130,9 @@ def QueryFromServer(config, **kwargs):
     result  = conn.getQueryService().projection(query, omero.sys.ParametersI(),{"omero.group": "-1"})
     df_criteria = pd.DataFrame()            
     for nb,row in enumerate(result): ## Transform the results into a panda dataframe for each found match
-        temp = pd.DataFrame([[row[0].val, Path(row[1].val).stem,  row[2].val, row[3].val, row[4].val, row[5].val]],
-                            columns=["id_omero", "id_external", "Size", "ROIName","Points","Class"])            
+        temp = pd.DataFrame([[row[0].val, Path(row[1].val).stem,  row[2].val, row[3].val, row[4].val, row[5].val,row[6].val]],
+                            columns=["id_omero", "id_external", "Size", "ROIName","Points","Class","ROI_ID"])        
+
         df_criteria = pd.concat([df_criteria, temp])                                    
     df_criteria['SVS_PATH'] = [os.path.join(config['DATA']['SVS_Folder'], image_id+'.svs') for image_id in df_criteria['id_external']]
     df_criteria['NPY_PATH'] = [os.path.join(config['DATA']['SVS_Folder'], 'patches', image_id + '.npy') for image_id in df_criteria['id_external']]

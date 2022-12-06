@@ -228,13 +228,12 @@ class Preprocessor:
         """
         edges_to_test = lims_to_vec(xmin=xmin, xmax=xmax, ymin=ymin, ymax=ymax,patch_size=self.patch_size)
         remove_BG = None
-        
+
         # Loop over all tiles and see if they are members of the current ROI. Do in // 
         shared = (self.patch_size, remove_BG, contours_idx_within_ROI, df, coords)
         with WorkerPool(n_jobs=10, start_method='fork') as pool:
             pool.set_shared_objects(shared)
             results = pool.map(tile_membership_contour, list(edges_to_test), progress_bar=False)
-
         isInROI = np.asarray(results)
         df_export = pd.DataFrame({'coords_x': edges_to_test[isInROI,0], 'coords_y': edges_to_test[isInROI,1], 'tissue_type': row['ROIName']})
         return df_export
@@ -248,16 +247,17 @@ class Preprocessor:
             cur_dataset = self.contours_processing(row)
             cur_dataset['id_external'] = row['id_external']
             cur_dataset['SVS_PATH']    = row['SVS_PATH']            
-        
             df = pd.concat([df,cur_dataset], ignore_index=True)
             print('--------------------------------------------------------------------------------')
-        print(df.shape)
-        for name, group in df.groupby('id_external'):
-            print(df)
-            #group = group.drop_duplicates(subset=['coords_x','coords_y'], keep='last')
-            self.Create_Contours_Overlay_QA(group)
-        print(df.shape)
         df[['coords_x', 'coords_y']] = df[['coords_x', 'coords_y']].astype('int')
+        print(df.shape)
+        df_final = pd.DataFrame()
+        for name, group in df.groupby('id_external'):
+            group = group.drop_duplicates(subset=['coords_x','coords_y'], keep='last')
+            df_final = pd.concat([df_final, group],ignore_index=True)
+            #self.Create_Contours_Overlay_QA(group) For QA
+            
+        print(df_final.shape)
         return df
 
     def getAllTiles(self, dataset):

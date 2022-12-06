@@ -1,3 +1,7 @@
+import sys
+sys.path.insert(0,'/home/cacof1/Software/DigitalPathologyPreprocessing/')
+
+
 from Dataloader.Dataloader import *
 from Utils.PreprocessingTools import Preprocessor
 import toml
@@ -17,13 +21,11 @@ config = toml.load(sys.argv[1])
 ########################################################################################################################
 # 1. Download all relevant files based on the configuration file
 
-SVS_dataset = QueryFromServer(config)
-
+SVS_dataset = QueryROI(config)
 ## For hierarchical sorting
 SVS_dataset['ROIName'] = pd.Categorical(SVS_dataset.ROIName, ordered=True, categories=config['CRITERIA']['ROI'])
-
-#print(SVS_dataset)
 SVS_dataset = SVS_dataset.sort_values('ROIName')
+
 SVS_dataset = SVS_dataset.reset_index()
 
 SynchronizeSVS(config, SVS_dataset)
