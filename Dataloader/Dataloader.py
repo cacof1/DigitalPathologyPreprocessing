@@ -109,7 +109,7 @@ def SaveFileParameter(config, df, SVS_ID):
     return npy_path
 
 def QueryROI(config, **kwargs):
-    print("Querying from Server")
+    print("Querying ROI from Server")
     df   = pd.DataFrame()
     conn = connect(config['OMERO']['Host'], config['OMERO']['User'], config['OMERO']['Pw'])  ## Group not implemented yet
     conn.SERVICE_OPTS.setOmeroGroup('-1')
@@ -128,15 +128,19 @@ def QueryROI(config, **kwargs):
     query   = query_base + query_end
     
     result  = conn.getQueryService().projection(query, omero.sys.ParametersI(),{"omero.group": "-1"})
-    df_criteria = pd.DataFrame()            
     for nb,row in enumerate(result): ## Transform the results into a panda dataframe for each found match
-        temp = pd.DataFrame([[row[0].val, Path(row[1].val).stem,  row[2].val, row[3].val, row[4].val, row[5].val,row[6].val]],
-                            columns=["id_omero", "id_external", "Size", "ROIName","Points","Class","ROI_ID"])        
+        try:
+            temp = pd.DataFrame([[row[0].val, Path(row[1].val).stem,  row[2].val, row[3].val, row[4], row[5].val,row[6].val]],
+                                columns=["id_omero", "id_external", "Size", "ROIName","Points","Class","ROI_ID"])
+            df = pd.concat([df, temp],ignore_index = True)
 
-        df_criteria = pd.concat([df_criteria, temp])                                    
-    df_criteria['SVS_PATH'] = [os.path.join(config['DATA']['SVS_Folder'], image_id+'.svs') for image_id in df_criteria['id_external']]
-    df_criteria['NPY_PATH'] = [os.path.join(config['DATA']['SVS_Folder'], 'patches', image_id + '.npy') for image_id in df_criteria['id_external']]
-    df = pd.concat([df, df_criteria], ignore_index=True)
+        except: continue
+
+     
+    df['SVS_PATH'] = [os.path.join(config['DATA']['SVS_Folder'], image_id+'.svs') for image_id in df['id_external']]
+    df['NPY_PATH'] = [os.path.join(config['DATA']['SVS_Folder'], 'patches', image_id + '.npy') for image_id in df['id_external']]
+
+    df.to_csv("FromAI.csv")
     print(df)
     conn.close()
     return df
