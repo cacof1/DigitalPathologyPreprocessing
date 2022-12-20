@@ -1,6 +1,6 @@
 from pytorch_lightning import LightningDataModule
 from torch.utils.data import DataLoader
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split, GroupShuffleSplit
 from sklearn import preprocessing
 import openslide
 import torch
@@ -9,12 +9,11 @@ import itertools
 import Utils.sampling_schemes as sampling_schemes
 from Utils.OmeroTools import *
 from pathlib import Path
-
-#pd.set_option('display.max_rows', None)
+from QA.StainNormalization import ColourNorm
 class DataGenerator(torch.utils.data.Dataset):
 
     def __init__(self, tile_dataset, target="tumour_label", dim = (256, 256), vis = 0, inference=False,
-                 transform=None, target_transform=None, svs_folder=None):
+                 transform=None, target_transform=None):
 
         super().__init__()
         self.transform = transform
@@ -24,27 +23,34 @@ class DataGenerator(torch.utils.data.Dataset):
         self.dim       = dim
         self.inference = inference
         self.target = target
-        self.svs_folder = svs_folder
 
     def __len__(self):
         return int(self.tile_dataset.shape[0])
 
     def __getitem__(self, id):
         # load image
-        svs_path = os.path.join(self.svs_folder, self.tile_dataset["SVS_ID"].iloc[id] + '.svs')
+        svs_path = self.tile_dataset['SVS_PATH'].iloc[id]
         svs_file = openslide.open_slide(svs_path)
-        data = svs_file.read_region([self.tile_dataset["coords_x"].iloc[id], self.tile_dataset["coords_y"].iloc[id]], self.vis, self.dim).convert("RGB")
+        data     = np.array(svs_file.read_region([self.tile_dataset["coords_x"].iloc[id], self.tile_dataset["coords_y"].iloc[id]], self.vis, self.dim).convert("RGB"))    
+        
+        for transform_step in self.transform.transforms:
+            if(isinstance(transform_step,ColourNorm.Macenko)):
+                #HE, maxC = ColourNorm.Macenko().find_HE(data, get_maxC=True)
                 
+                #data     = transform(data, self.tile_dataset['HE'].iloc[id])
+                #data     = transform_step(data, HE, maxC)
+                continue
+            else: data = transform_step(data)
+
         ## Transform - Data Augmentation
-        if self.transform: data = self.transform(data)
+        #if self.transform: data = self.transform(data)
 
         if self.inference:
             return data
-            
+
         else: ## Training
             label = self.tile_dataset[self.target].iloc[id]
-            if self.target_transform:
-                label = self.target_transform(label)
+            if self.target_transform: label = self.target_transform(label)
 
             return data, label
 
@@ -52,23 +58,38 @@ class DataGenerator(torch.utils.data.Dataset):
 class DataModule(LightningDataModule):
 
     def __init__(self, tile_dataset, train_transform=None, val_transform=None, batch_size=8, n_per_sample=np.Inf,
-                 train_size=0.7, val_size=0.3, target=None, sampling_scheme='wsi', svs_folder=None,
-                 label_encoder=None, **kwargs):
+                 train_size=0.7, val_size=0.15, test_size=0.15, target=None, sampling_scheme='wsi', label_encoder=None, **kwargs):
         super().__init__()
-
         self.batch_size = batch_size
         if(label_encoder):  tile_dataset[target] = label_encoder.transform(tile_dataset[target])  ## For classif only
 
+        ## Split Test with differents WSI
+        gss                       = GroupShuffleSplit(n_splits=1, test_size=test_size, random_state=42)
+        train_val_inds, test_inds = next(gss.split(tile_dataset, groups=tile_dataset['id_external']))
+        tile_dataset_train_val    = tile_dataset.iloc[train_val_inds].reset_index()
+        tile_dataset_test         = tile_dataset.iloc[test_inds].reset_index()
+
+        ## Shuffle Train and Val
+        tile_dataset_train, tile_dataset_val = train_test_split(tile_dataset_train_val, train_size=train_size, stratify=tile_dataset_train_val[target],random_state=np.random.randint(10000))
+
+        ## Select only N per sample from each class
+        tile_dataset_train = tile_dataset_train.groupby(target).head(n=n_per_sample)
+        tile_dataset_val   = tile_dataset_val.groupby(target).head(n=n_per_sample)                
+        tile_dataset_test  = tile_dataset_test.groupby(target).head(n=n_per_sample)
+
+
+        
+        """
         if sampling_scheme.lower() == 'wsi':
             tile_dataset_sampled = sampling_schemes.sample_N_per_WSI(tile_dataset, n_per_sample=n_per_sample)
 
-            svi = np.unique(tile_dataset_sampled.SVS_ID)
+            svi = np.unique(tile_dataset_sampled.id_external)
             np.random.shuffle(svi)
 
             train_idx, val_idx = train_test_split(svi, test_size=val_size, train_size=train_size)
 
-            tile_dataset_train = tile_dataset_sampled[tile_dataset_sampled.SVS_ID.isin(train_idx)]
-            tile_dataset_valid = tile_dataset_sampled[tile_dataset_sampled.SVS_ID.isin(val_idx)]
+            tile_dataset_train = tile_dataset_sampled[tile_dataset_sampled.id_external.isin(train_idx)]
+            tile_dataset_valid = tile_dataset_sampled[tile_dataset_sampled.id_external.isin(val_idx)]
 
         elif sampling_scheme.lower() == 'patch':
             tile_dataset_sampled = sampling_schemes.sample_N_per_WSI(tile_dataset, n_per_sample=n_per_sample)
@@ -78,15 +99,19 @@ class DataModule(LightningDataModule):
             sampler = getattr(sampling_schemes, sampling_scheme) ## to change, Naming!
             tile_dataset_train, tile_dataset_valid = sampler(tile_dataset, target=target, n_per_sample=n_per_sample,
                                                              train_size=train_size, test_size=val_size)
-
-        self.train_data = DataGenerator(tile_dataset_train, transform=train_transform, target=target, svs_folder=svs_folder, **kwargs)
-        self.val_data   = DataGenerator(tile_dataset_valid, transform=val_transform, target=target, svs_folder=svs_folder, **kwargs)
+        """
+        self.train_data = DataGenerator(tile_dataset_train, transform=train_transform, target=target, **kwargs)
+        self.val_data   = DataGenerator(tile_dataset_val  , transform=val_transform  , target=target, **kwargs)
+        self.test_data  = DataGenerator(tile_dataset_test , transform=val_transform  , target=target, **kwargs)        
         
     def train_dataloader(self):
-        return DataLoader(self.train_data, batch_size=self.batch_size, num_workers=10, pin_memory=True, shuffle=True)
+        return DataLoader(self.train_data, batch_size=self.batch_size, num_workers=60, pin_memory=True, shuffle=True)
 
     def val_dataloader(self):
-        return DataLoader(self.val_data, batch_size=self.batch_size, num_workers=10, pin_memory=True)
+        return DataLoader(self.val_data, batch_size=self.batch_size, num_workers=60, pin_memory=True)
+
+    def test_dataloader(self):
+        return DataLoader(self.test_data, batch_size=self.batch_size, num_workers=60, pin_memory=True)
 
 
 def LoadFileParameter(config, dataset):
@@ -99,14 +124,30 @@ def LoadFileParameter(config, dataset):
     return tile_dataset
 
 
-def SaveFileParameter(config, df, SVS_ID):
+def SaveFileParameter(config, df, id_external):
     cur_basemodel_str = npyExportTools.basemodel_to_str(config)
-    npy_path = os.path.join(config['DATA']['SVS_Folder'], 'patches', SVS_ID + ".npy")
+    npy_path = os.path.join(config['DATA']['SVS_Folder'], 'patches', id_external + ".npy")
     os.makedirs(os.path.split(npy_path)[0], exist_ok=True)  # in case folder is non-existent
     npy_dict = np.load(npy_path, allow_pickle=True).item() if os.path.exists(npy_path) else {}
     npy_dict[cur_basemodel_str] = [config, df]
     np.save(npy_path, npy_dict)
     return npy_path
+
+def QueryImage(config, **kwargs):
+    conn = connect(config['OMERO']['Host'], config['OMERO']['User'], config['OMERO']['Pw'])  ## Group not implemented yet
+    conn.SERVICE_OPTS.setOmeroGroup('-1')
+    
+    query ="""
+    select image.id,image.name, image.details.owner.id, image.details.group.id, f2.size from
+    Image as image
+    left join image.fileset as fs
+    left join fs.usedFiles as uf
+    left join uf.originalFile as f2
+    """
+    results = conn.getQueryService().projection(query, None,{"omero.group": "-1"})
+    df = pd.DataFrame([[row[0].val,row[1].val, row[2].val, row[3].val, row[4].val] for row in results], columns=["id_omero","id_external","OwnerID","GroupID","Size"])
+    df['SVS_PATH'] = [os.path.join(config['DATA']['SVS_Folder'], Path(image_id).stem+'.svs') for image_id in df['id_external']]
+    return df
 
 def QueryROI(config, **kwargs):
     print("Querying ROI from Server")
@@ -130,7 +171,7 @@ def QueryROI(config, **kwargs):
     result  = conn.getQueryService().projection(query, omero.sys.ParametersI(),{"omero.group": "-1"})
     for nb,row in enumerate(result): ## Transform the results into a panda dataframe for each found match
         try:
-            temp = pd.DataFrame([[row[0].val, Path(row[1].val).stem,  row[2].val, row[3].val, row[4], row[5].val,row[6].val]],
+            temp = pd.DataFrame([[row[0].val, Path(row[1].val).stem,  row[2].val, row[3].val, row[4].val, row[5].val,row[6].val]],
                                 columns=["id_omero", "id_external", "Size", "ROIName","Points","Class","ROI_ID"])
             df = pd.concat([df, temp],ignore_index = True)
 
@@ -140,7 +181,6 @@ def QueryROI(config, **kwargs):
     df['SVS_PATH'] = [os.path.join(config['DATA']['SVS_Folder'], image_id+'.svs') for image_id in df['id_external']]
     df['NPY_PATH'] = [os.path.join(config['DATA']['SVS_Folder'], 'patches', image_id + '.npy') for image_id in df['id_external']]
 
-    df.to_csv("FromAI.csv")
     print(df)
     conn.close()
     return df

@@ -270,7 +270,7 @@ class Preprocessor:
                                         ymax=WSI_object.level_dimensions[0][1],
                                         patch_size=self.patch_size)
             cur_dataset = pd.DataFrame({'coords_x': edges_to_test[:, 0], 'coords_y': edges_to_test[:, 1]})
-            cur_dataset['SVS_ID'] = row['id_external']
+            cur_dataset['id_external'] = row['id_external']
             df = pd.concat([df, cur_dataset], ignore_index=True)
 
         print('--------------------------------------------------------------------------------')

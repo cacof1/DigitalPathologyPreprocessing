@@ -2,53 +2,39 @@ from datetime import date
 import os
 import numpy as np
 
-def ShowTrainValTestInfo(data, config):
-
-    target = config['DATA']['Label']
-
-    # todo: reorganise this mess below.
-
+def ShowTrainValTestInfo(data, config, label_encoder):
+    TotalTiles =  data.train_data.tile_dataset.shape[0] + data.val_data.tile_dataset.shape[0] + data.test_data.tile_dataset.shape[0]
+    #TotalWSI   =  data.train_data.tile_dataset['id_external'].nunique() + data.val_data.tile_dataset['id_external'].nunique() +data.test_data.tile_dataset['id_external'].nunique()
+    TotalWSI   =  data.train_data.tile_dataset['id_external'].nunique() +data.test_data.tile_dataset['id_external'].nunique()
     if config['ADVANCEDMODEL']['Inference'] is False:
-
-        label_counter = np.zeros(len(data.train_data.tile_dataset[target].unique()))
-
         if config['VERBOSE']['Data_Info']:
+            ## Train
+            train_df = data.train_data.tile_dataset.copy()
+            print(train_df)
+            print('\nTrain ------------------------------')
+            print('Tiles : {}/{:.2f}%'.format(train_df.shape[0], 100*float(train_df.shape[0])/TotalTiles))
+            print('WSI : {}/{:.2f}%'.format(train_df['id_external'].nunique(), 100*float(train_df['id_external'].nunique())/TotalWSI))            
+            train_df[config['DATA']['Label']] = label_encoder.inverse_transform(train_df[config['DATA']['Label']])
+            print(train_df[config['DATA']['Label']].value_counts(normalize=True))
+            print(train_df['id_external'].value_counts(normalize=True))
 
-            # Return some stats about what you're training/validating on...
-            for label in data.train_data.tile_dataset[target].unique():
-                npts_train = sum(data.train_data.tile_dataset[target] == label)
-                print('Your training dataset has {}/{} ({:.2f}%) patches of class {}.'.format(npts_train, len(data.train_data.tile_dataset[target]), npts_train/len(data.train_data.tile_dataset[target])*100, label))
-                label_counter[label] += npts_train
+            ## Val
+            val_df = data.val_data.tile_dataset.copy()
+            print('\nVal ------------------------------')
+            print('Tiles : {}/{:.2f}%'.format(val_df.shape[0], 100*float(val_df.shape[0])/TotalTiles))
+            print('WSI : {}/{:.2f}%'.format(val_df['id_external'].nunique(), 100*float(val_df['id_external'].nunique())/TotalWSI))                        
+            val_df[config['DATA']['Label']] = label_encoder.inverse_transform(val_df[config['DATA']['Label']])
+            print(val_df[config['DATA']['Label']].value_counts(normalize=True))
+            print(val_df['id_external'].value_counts(normalize=True))
 
-            fc = data.train_data.tile_dataset.SVS_ID.copy()
-            print('Distribution of the {} patches from the {} file_ids within the training dataset: '.format(len(fc),len(fc.unique())))
-            for f in fc.unique():
-                print('{} = {}/{} = {:.2f}%, '.format(f, sum(fc == f), len(fc), 100*sum(fc == f)/len(fc)))
-            print('------------------')
-            for label in data.val_data.tile_dataset[target].unique():
-                npts_valid = sum(data.val_data.tile_dataset[target] == label)
-                print('Your validation dataset has {}/{} ({:.2f}%) patches of class {}.'.format(npts_valid, len(data.val_data.tile_dataset[target]), npts_valid/len(data.val_data.tile_dataset[target])*100, label))
-                label_counter[label] += npts_valid
-
-            fc = data.val_data.tile_dataset.SVS_ID.copy()
-            print('Distribution of the {} patches from the {} file_ids within the validation dataset: '.format(len(fc),len(fc.unique())))
-            for f in fc.unique():
-                print('{} = {}/{} = {:.2f}%, '.format(f, sum(fc == f), len(fc), 100*sum(fc == f)/len(fc)))
-            print('------------------')
-
-            try:
-                for label in data.test_data.tile_dataset[target].unique():
-                    print('Your test dataset has {}/{} patches of class {}.'.format(sum(data.test_data.tile_dataset[target] == label), len(data.test_data.tile_dataset[target]), label))
-                fc = data.test_data.tile_dataset.file_id.copy()
-                print('Distribution of the {} patches from the {} file_ids within the test dataset: '.format(len(fc),len(fc.unique())))
-                for f in fc.unique():
-                    print('{} = {}/{} = {:.2f}%, '.format(f, sum(fc == f), len(fc), 100*sum(fc == f)/len(fc)))
-                print('------------------')
-            except:
-                print('No test data.')
-
-    return label_counter
-
+            ## Test
+            test_df = data.test_data.tile_dataset.copy()
+            print('\nTest ------------------------------')
+            print('Tiles : {}/{:.2f}%'.format(test_df.shape[0], 100*float(test_df.shape[0])/TotalTiles))
+            print('WSI : {}/{:.2f}%'.format(test_df['id_external'].nunique(), 100*float(test_df['id_external'].nunique())/TotalWSI))                                    
+            test_df[config['DATA']['Label']] = label_encoder.inverse_transform(test_df[config['DATA']['Label']])
+            print(test_df[config['DATA']['Label']].value_counts(normalize=True))
+            print(test_df['id_external'].value_counts(normalize=True))                                    
 
 def format_model_name(config):
 
@@ -84,11 +70,11 @@ def format_model_name(config):
 
         dimstr = ''
         for dim in range(len(config['BASEMODEL']['Patch_Size'])):
-            dimstr = dimstr + str(config['BASEMODEL']['Patch_Size'][dim][0]) + '_'
+            dimstr = dimstr + str(config['BASEMODEL']['Patch_Size'][dim]) + '_'
 
         visstr = ''
-        for vis in range(len(config['BASEMODEL']['Vis'])):
-            visstr = visstr + str(config['BASEMODEL']['Vis'][dim]) + '_'
+        for vis in config['BASEMODEL']['Vis']:
+            visstr += str(vis) + '_'
 
         main_block = '_dim' + dimstr +\
                      'vis' + visstr +\

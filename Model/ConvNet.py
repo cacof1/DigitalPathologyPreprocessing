@@ -2,10 +2,11 @@ import pytorch_lightning as pl
 import torch
 import torch.nn as nn
 from torchmetrics.functional import accuracy
+from torchmetrics.classification import ROC
 from torchvision import models
 from torch.nn.functional import softmax
 import transformers  # from hugging face
-
+import matplotlib.pyplot as plt
 # Basic implementation of a convolutional neural network based on common backbones (any in torchvision.models)
 class ConvNet(pl.LightningModule):
 
@@ -13,7 +14,6 @@ class ConvNet(pl.LightningModule):
         super().__init__()
 
         self.save_hyperparameters()  # will save the hyperparameters that come as an input.
-
         self.config = config
 
         self.backbone = getattr(models, config['BASEMODEL']['Backbone'])
@@ -62,7 +62,7 @@ class ConvNet(pl.LightningModule):
         self.log('val_acc', acc, on_step=True, on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
         return loss
 
-    def testing_step(self, test_batch, batch_idx):
+    def test_step(self, test_batch, batch_idx):
         image, labels = test_batch
         logits = self.forward(image)
         loss = self.loss_fcn(logits, labels)
@@ -70,13 +70,27 @@ class ConvNet(pl.LightningModule):
         acc = accuracy(preds, labels)
         self.log('test_loss', loss, on_step=True, on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
         self.log('test_acc', acc, on_step=True, on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
-        return loss
+        return {"loss":loss, "logits":logits, "labels":labels}
 
+    def test_epoch_end(self, outputs):
+        roc = ROC(num_classes = self.config["DATA"]["N_Classes"])
+        labels = torch.cat([out['labels'] for out in outputs], dim=0)
+        logits  = torch.cat([out['logits'] for out in outputs], dim=0)        
+        fpr, tpr, thresholds = roc(logits, labels)
+        for i, (class_fpr,class_tpr) in enumerate(zip(fpr, tpr)):
+            class_fpr = class_fpr.cpu().detach().numpy()
+            class_tpr = class_tpr.cpu().detach().numpy()            
+            print(class_fpr, class_tpr)
+            Class = str(self.LabelEncoder.inverse_transform([i])[0])
+            plt.plot(class_fpr,class_tpr,label=Class)
+        plt.legend(frameon=False)
+        plt.title("Class :"+Class)
+        plt.savefig(self.logger.log_dir+"/"+Class+".png")
+    
     def predict_step(self, batch, batch_idx, dataloader_idx=0):
 
         image = batch
         output = softmax(self(image), dim=1)
-
         return self.all_gather(output)
 
     def configure_optimizers(self):

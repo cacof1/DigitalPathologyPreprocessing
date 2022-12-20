@@ -73,20 +73,20 @@ for tissue_no, tissue_name in enumerate(tissue_names):
     tile_dataset = tile_dataset.fillna(0)
 
 # todo: remove both following lines once the SaveFileParameter below works.
-for SVS_ID, df_split in tile_dataset.groupby(tile_dataset.SVS_ID):
-    npy_file = SaveFileParameter(config, df_split, SVS_ID)
+for id_external, df_split in tile_dataset.groupby(tile_dataset.id_external):
+    npy_file = SaveFileParameter(config, df_split, id_external)
 
 ########################################################################################################################
 # 6. Send back to OMERO
 conn = connect(config['OMERO']['Host'], config['OMERO']['User'], config['OMERO']['Pw'])
 conn.SERVICE_OPTS.setOmeroGroup('-1')
 
-for SVS_ID, df_split in tile_dataset.groupby(tile_dataset.SVS_ID):
-    image = conn.getObject("Image", SVS_dataset.loc[SVS_dataset["id_internal"] == SVS_ID].iloc[0]['id_omero'])
+for id_external, df_split in tile_dataset.groupby(tile_dataset.id_external):
+    image = conn.getObject("Image", SVS_dataset.loc[SVS_dataset["id_internal"] == id_external].iloc[0]['id_omero'])
     group_id = image.getDetails().getGroup().getId()
     conn.SERVICE_OPTS.setOmeroGroup(group_id)
     print("Current group: ", group_id)
-    npy_file = SaveFileParameter(config, df_split, SVS_ID)
+    npy_file = SaveFileParameter(config, df_split, id_external)
     print("\nCreating an OriginalFile and FileAnnotation")
     file_ann = conn.createFileAnnfromLocalFile(npy_file, mimetype="text/plain", desc=None)
     print("Attaching FileAnnotation to Dataset: ", "File ID:", file_ann.getId(), ",", file_ann.getFile().getName(),
@@ -99,6 +99,6 @@ for SVS_ID, df_split in tile_dataset.groupby(tile_dataset.SVS_ID):
         conn.deleteObjects('Annotation', to_delete, wait=True)
     if len(to_delete)>0: image.linkAnnotation(file_ann)  # link it to dataset.
     
-    print('{}.npy uploaded'.format(SVS_ID))
+    print('{}.npy uploaded'.format(id_external))
     
 conn.close()
