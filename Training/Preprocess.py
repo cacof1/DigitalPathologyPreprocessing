@@ -14,8 +14,9 @@ import torch
 from QA.StainNormalization import ColourNorm
 from Model.ConvNet import ConvNet
 import matplotlib.pyplot as plt
-#pd.set_option('display.max_rows', None) 
-config = toml.load(sys.argv[1])
+#pd.set_option('display.max_rows', None)
+config_file  = sys.argv[1]
+config       = toml.load(config_file)
 
 ########################################################################################################################
 # 1. Download all relevant ROI based on the configuration file
@@ -33,10 +34,14 @@ SynchronizeSVS(config, SVS_dataset)
 # 3. Pre-processing: create tile_dataset from annotations list
 preprocessor = Preprocessor(config)
 tile_dataset = preprocessor.getTilesFromAnnotations(SVS_dataset)
-config['DATA']['N_Classes'] = len(tile_dataset[config['DATA']['Label']].unique())
 
-########################################################################################################################
-# 4. Model
+
+## Manual fiddling
+tile_dataset.loc[ tile_dataset['tissue_type'].str.contains('Artifact'),'tissue_type'] = 'Artifact'
+tile_dataset.loc[ tile_dataset['tissue_type'].str.contains('Muscle'),'tissue_type'] = 'Muscle'
+
+config['DATA']['N_Classes'] = len(tile_dataset[config['DATA']['Label']].unique())
+print(tile_dataset)
 
 # Set up logging, model checkpoint
 name = GetInfo.format_model_name(config)
@@ -45,6 +50,10 @@ if 'logger_folder' in config['CHECKPOINT']:
 else:
     logger = TensorBoardLogger('lightning_logs', name=name)
 
+
+
+########################################################################################################################
+# 4. Model
 lr_monitor = LearningRateMonitor(logging_interval='step')
 checkpoint_callback = ModelCheckpoint(dirpath=config['CHECKPOINT']['Model_Save_Path'],
                                       monitor=config['CHECKPOINT']['Monitor'],
@@ -85,9 +94,10 @@ label_encoder = preprocessing.LabelEncoder()
 label_encoder.fit(tile_dataset[config['DATA']['Label']])
 
 # Load model and train
-trainer = pl.Trainer(gpus=[0,1],#torch.cuda.device_count(),  # could go into config file
-                     #strategy='ddp',
-                     strategy='horovod',
+print("N GPUs: ",torch.cuda.device_count())
+trainer = pl.Trainer(gpus=torch.cuda.device_count(),  # could go into config file
+                     strategy='ddp',
+                     #strategy='horovod',
                      benchmark=True,
                      max_epochs=config['ADVANCEDMODEL']['Max_Epochs'],
                      precision=config['BASEMODEL']['Precision'],
@@ -119,3 +129,12 @@ trainer.fit(model, data)
 
 ## Test
 trainer.test(model, data.test_dataloader())
+
+## Write config file in logging folder for safekeeping
+with open(logger.log_dir+"/Config.ini", "w+") as toml_file:
+    toml.dump(config, toml_file)
+    toml_file.write("Train transform:\n")
+    toml_file.write(str(train_transform))
+    toml_file.write("Val/Test transform:\n")
+    toml_file.write(str(val_transform))
+

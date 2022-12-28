@@ -1,6 +1,7 @@
 import pytorch_lightning as pl
 import torch
 import torch.nn as nn
+import numpy as np
 from torchmetrics.functional import accuracy
 from torchmetrics.classification import ROC
 from torchvision import models
@@ -73,20 +74,21 @@ class ConvNet(pl.LightningModule):
         return {"loss":loss, "logits":logits, "labels":labels}
 
     def test_epoch_end(self, outputs):
-        roc = ROC(num_classes = self.config["DATA"]["N_Classes"])
-        labels = torch.cat([out['labels'] for out in outputs], dim=0)
+        roc     = ROC(num_classes = self.config["DATA"]["N_Classes"])
+        labels  = torch.cat([out['labels'] for out in outputs], dim=0)
         logits  = torch.cat([out['logits'] for out in outputs], dim=0)        
         fpr, tpr, thresholds = roc(logits, labels)
+        out_dict = {}
         for i, (class_fpr,class_tpr) in enumerate(zip(fpr, tpr)):
             class_fpr = class_fpr.cpu().detach().numpy()
             class_tpr = class_tpr.cpu().detach().numpy()            
-            print(class_fpr, class_tpr)
             Class = str(self.LabelEncoder.inverse_transform([i])[0])
+            out_dict[Class] = np.dstack((class_fpr, class_tpr))
             plt.plot(class_fpr,class_tpr,label=Class)
         plt.legend(frameon=False)
         plt.title("Class :"+Class)
-        plt.savefig(self.logger.log_dir+"/"+Class+".png")
-    
+        plt.savefig(self.logger.log_dir+"/ROC.png")
+        np.save(self.logger.log_dir+"/ROC.npy",out_dict)
     def predict_step(self, batch, batch_idx, dataloader_idx=0):
 
         image = batch

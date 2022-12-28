@@ -68,7 +68,6 @@ class Macenko(nn.Module):
         return OD, ODhat
 
     def find_HE(self, img, get_maxC=False):  # img has expected size C x H x W
-        #img = torch.tensor(img)
         img = img.reshape(img.shape[0], -1)  # Collapse H x W -> N
         
         OD, ODhat = self.convert_rgb2od(img)

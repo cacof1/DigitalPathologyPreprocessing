@@ -40,7 +40,8 @@ class DataGenerator(torch.utils.data.Dataset):
                 #data     = transform(data, self.tile_dataset['HE'].iloc[id])
                 #data     = transform_step(data, HE, maxC)
                 continue
-            else: data = transform_step(data)
+            else:
+                data = transform_step(data)
 
         ## Transform - Data Augmentation
         #if self.transform: data = self.transform(data)
@@ -68,15 +69,27 @@ class DataModule(LightningDataModule):
         train_val_inds, test_inds = next(gss.split(tile_dataset, groups=tile_dataset['id_external']))
         tile_dataset_train_val    = tile_dataset.iloc[train_val_inds].reset_index()
         tile_dataset_test         = tile_dataset.iloc[test_inds].reset_index()
-
+        
+        ## -- Version 1 50/50
         ## Shuffle Train and Val
         tile_dataset_train, tile_dataset_val = train_test_split(tile_dataset_train_val, train_size=train_size, stratify=tile_dataset_train_val[target],random_state=np.random.randint(10000))
 
         ## Select only N per sample from each class
-        tile_dataset_train = tile_dataset_train.groupby(target).head(n=n_per_sample)
-        tile_dataset_val   = tile_dataset_val.groupby(target).head(n=n_per_sample)                
-        tile_dataset_test  = tile_dataset_test.groupby(target).head(n=n_per_sample)
+        tile_dataset_train       = tile_dataset_train.groupby(target).head(n=n_per_sample)
+        tile_dataset_val         = tile_dataset_val.groupby(target).head(n=n_per_sample)                        
+        tile_dataset_test        = tile_dataset_test.groupby(target).head(n=n_per_sample)
+ 
+        ### -- Version 2 70/30
 
+        ## Select only N per sample from each class
+        #tile_dataset_train_val   = tile_dataset_train_val.groupby(target).head(n=n_per_sample)
+        #tile_dataset_test        = tile_dataset_test.groupby(target).head(n=n_per_sample)
+
+        ## Shuffle Train and Val
+        #tile_dataset_train, tile_dataset_val = train_test_split(tile_dataset_train_val, train_size=train_size, stratify=tile_dataset_train_val[target],random_state=np.random.randint(10000))
+        
+
+        
 
         
         """

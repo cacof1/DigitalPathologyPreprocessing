@@ -1,7 +1,7 @@
 from datetime import date
 import os
 import numpy as np
-
+import pandas as pd
 def ShowTrainValTestInfo(data, config, label_encoder):
     TotalTiles =  data.train_data.tile_dataset.shape[0] + data.val_data.tile_dataset.shape[0] + data.test_data.tile_dataset.shape[0]
     #TotalWSI   =  data.train_data.tile_dataset['id_external'].nunique() + data.val_data.tile_dataset['id_external'].nunique() +data.test_data.tile_dataset['id_external'].nunique()
@@ -15,8 +15,10 @@ def ShowTrainValTestInfo(data, config, label_encoder):
             print('Tiles : {}/{:.2f}%'.format(train_df.shape[0], 100*float(train_df.shape[0])/TotalTiles))
             print('WSI : {}/{:.2f}%'.format(train_df['id_external'].nunique(), 100*float(train_df['id_external'].nunique())/TotalWSI))            
             train_df[config['DATA']['Label']] = label_encoder.inverse_transform(train_df[config['DATA']['Label']])
-            print(train_df[config['DATA']['Label']].value_counts(normalize=True))
-            print(train_df['id_external'].value_counts(normalize=True))
+            print(pd.concat( [train_df[config['DATA']['Label']].value_counts(normalize=True),
+                              train_df[config['DATA']['Label']].value_counts()], axis=1, keys=('perc','count')))
+            print(pd.concat( [train_df['id_external'].value_counts(normalize=True),
+                              train_df['id_external'].value_counts()], axis=1, keys=('perc','count')))             
 
             ## Val
             val_df = data.val_data.tile_dataset.copy()
@@ -24,8 +26,11 @@ def ShowTrainValTestInfo(data, config, label_encoder):
             print('Tiles : {}/{:.2f}%'.format(val_df.shape[0], 100*float(val_df.shape[0])/TotalTiles))
             print('WSI : {}/{:.2f}%'.format(val_df['id_external'].nunique(), 100*float(val_df['id_external'].nunique())/TotalWSI))                        
             val_df[config['DATA']['Label']] = label_encoder.inverse_transform(val_df[config['DATA']['Label']])
-            print(val_df[config['DATA']['Label']].value_counts(normalize=True))
-            print(val_df['id_external'].value_counts(normalize=True))
+            print(pd.concat( [val_df[config['DATA']['Label']].value_counts(normalize=True),
+                              val_df[config['DATA']['Label']].value_counts()], axis=1, keys=('perc','count')))
+            print(pd.concat( [val_df['id_external'].value_counts(normalize=True),
+                              val_df['id_external'].value_counts()], axis=1, keys=('perc','count'))) 
+
 
             ## Test
             test_df = data.test_data.tile_dataset.copy()
@@ -33,8 +38,10 @@ def ShowTrainValTestInfo(data, config, label_encoder):
             print('Tiles : {}/{:.2f}%'.format(test_df.shape[0], 100*float(test_df.shape[0])/TotalTiles))
             print('WSI : {}/{:.2f}%'.format(test_df['id_external'].nunique(), 100*float(test_df['id_external'].nunique())/TotalWSI))                                    
             test_df[config['DATA']['Label']] = label_encoder.inverse_transform(test_df[config['DATA']['Label']])
-            print(test_df[config['DATA']['Label']].value_counts(normalize=True))
-            print(test_df['id_external'].value_counts(normalize=True))                                    
+            print(pd.concat( [test_df[config['DATA']['Label']].value_counts(normalize=True),
+                              test_df[config['DATA']['Label']].value_counts()], axis=1, keys=('perc','count')))
+            print(pd.concat( [test_df['id_external'].value_counts(normalize=True),
+                              test_df['id_external'].value_counts()], axis=1, keys=('perc','count')))                         
 
 def format_model_name(config):
 
