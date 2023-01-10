@@ -10,6 +10,8 @@ import Utils.sampling_schemes as sampling_schemes
 from Utils.OmeroTools import *
 from pathlib import Path
 from QA.StainNormalization import ColourNorm
+from Utils import npyExportTools
+
 class DataGenerator(torch.utils.data.Dataset):
 
     def __init__(self, tile_dataset, target="tumour_label", dim = (256, 256), vis = 0, inference=False,
@@ -32,13 +34,11 @@ class DataGenerator(torch.utils.data.Dataset):
         svs_path = self.tile_dataset['SVS_PATH'].iloc[id]
         svs_file = openslide.open_slide(svs_path)
         data     = np.array(svs_file.read_region([self.tile_dataset["coords_x"].iloc[id], self.tile_dataset["coords_y"].iloc[id]], self.vis, self.dim).convert("RGB"))    
-        
         for transform_step in self.transform.transforms:
             if(isinstance(transform_step,ColourNorm.Macenko)):
-                #HE, maxC = ColourNorm.Macenko().find_HE(data, get_maxC=True)
-                
-                #data     = transform(data, self.tile_dataset['HE'].iloc[id])
-                #data     = transform_step(data, HE, maxC)
+                HE, maxC = ColourNorm.Macenko().find_HE(data, get_maxC=True)
+                #data     = transform_step(data, self.tile_dataset['HE'].iloc[id])
+                data     = transform_step(data, HE, maxC)                                    
                 continue
             else:
                 data = transform_step(data)
@@ -87,11 +87,7 @@ class DataModule(LightningDataModule):
 
         ## Shuffle Train and Val
         #tile_dataset_train, tile_dataset_val = train_test_split(tile_dataset_train_val, train_size=train_size, stratify=tile_dataset_train_val[target],random_state=np.random.randint(10000))
-        
-
-        
-
-        
+                     
         """
         if sampling_scheme.lower() == 'wsi':
             tile_dataset_sampled = sampling_schemes.sample_N_per_WSI(tile_dataset, n_per_sample=n_per_sample)
@@ -126,7 +122,6 @@ class DataModule(LightningDataModule):
     def test_dataloader(self):
         return DataLoader(self.test_data, batch_size=self.batch_size, num_workers=60, pin_memory=True)
 
-
 def LoadFileParameter(config, dataset):
 
     cur_basemodel_str = basemodel_to_str(config)
@@ -135,7 +130,6 @@ def LoadFileParameter(config, dataset):
         header, existing_df = np.load(npy_path, allow_pickle=True).item()[cur_basemodel_str]
         tile_dataset = pd.concat([tile_dataset, existing_df], ignore_index=True)
     return tile_dataset
-
 
 def SaveFileParameter(config, df, id_external):
     cur_basemodel_str = npyExportTools.basemodel_to_str(config)
@@ -198,6 +192,51 @@ def QueryROI(config, **kwargs):
     conn.close()
     return df
 
+
+def QueryImageFromCriteria(config, **kwargs):
+    print("Querying from Server")
+    df   = pd.DataFrame()
+    conn = connect(config['OMERO']['Host'], config['OMERO']['User'], config['OMERO']['Pw'])  ## Group not implemented yet
+    conn.SERVICE_OPTS.setOmeroGroup('-1')
+
+    keys = list(config['CRITERIA'].keys())
+    value_iter = itertools.product(*config['CRITERIA'].values())  ## Create a joint list with all elements
+    for value in value_iter:
+        query_base = """
+        select image.id, image.name, f2.size, a from
+        ImageAnnotationLink ial
+        join ial.child a
+        join ial.parent image
+        left outer join image.pixels p
+        left outer join image.fileset as fs
+        left outer join fs.usedFiles as uf
+        left outer join uf.originalFile as f2
+        """
+        query_end = ""
+        params = omero.sys.ParametersI()
+        for nb, temp in enumerate(value):
+            query_base += "join a.mapValue mv" + str(nb) + " \n        "
+            if nb == 0: query_end += "where (mv" + str(nb) + ".name = :key" + str(nb) + " and mv" + str(nb) + ".value = :value" + str(nb) + ")"
+            else:       query_end += " and (mv" + str(nb) + ".name = :key" + str(nb) + " and mv" + str(nb) + ".value = :value" + str(nb) + ")"
+            params.addString('key' + str(nb), keys[nb])
+            params.addString('value' + str(nb), temp)
+
+        query   = query_base + query_end
+        result  = conn.getQueryService().projection(query, params, {"omero.group": "-1"})
+
+        df_criteria = pd.DataFrame()
+        for row in result: ## Transform the results into a panda dataframe for each found match
+            temp = pd.DataFrame([[row[0].val, Path(row[1].val).stem, row[2].val, *row[3].val.getMapValueAsMap().values()]],
+                                columns=["id_omero", "id_external", "Size", *row[3].val.getMapValueAsMap().keys()])
+            df_criteria = pd.concat([df_criteria, temp])
+        
+        df_criteria['SVS_PATH'] = [os.path.join(config['DATA']['SVS_Folder'], image_id+'.svs') for image_id in df_criteria['id_external']]
+        df_criteria['NPY_PATH'] = [os.path.join(config['DATA']['SVS_Folder'], 'patches', image_id + '.npy') for image_id in df_criteria['id_external']]
+
+        df = pd.concat([df, df_criteria])
+
+    conn.close()
+    return df
 
 def SynchronizeSVS(config, df):
 

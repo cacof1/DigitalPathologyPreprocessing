@@ -79,16 +79,22 @@ def contour_intersect(cnt_ref, cnt_query):
     return False
 
 def patch_background_fraction(shared, edge):
-    # shared is a tuple: (WSI_object, patch_size, bg_threshold). To work with // processing.
+    # shared is a tuple: (WSI_object, patch_size, vis, bg_threshold). To work with // processing.
     # patch_background_fraction grabs an image patch of size patch_size from WSI_object at location edge.
-    # It then evaluate background fraction defined as the number of pixels where greyscase > threshold*255.
+    # It then evaluate background fraction defined as the number of pixels where greyscase > threshold.
 
-    patch = np.array(shared[0].read_region(edge, 0, tuple(shared[1])).convert("RGB"))
-    img_norm = patch.transpose(2, 0, 1)
-    patch_norm_gray = img_norm[:, :, 0] * 0.2989 + img_norm[:, :, 1] * 0.5870 + img_norm[:, :, 2] * 0.1140
-    background_fraction = np.sum(patch_norm_gray > shared[2] * 255) / np.prod(patch_norm_gray.shape)
+    patch = np.array(shared[0].read_region(edge, shared[2], tuple(shared[1])).convert("RGB"))
+    patch_norm_gray = patch[:, :, 0] * 0.2989 + patch[:, :, 1] * 0.5870 + patch[:, :, 2] * 0.1140
+    background_fraction = np.sum(patch_norm_gray > shared[3]) / np.prod(patch_norm_gray.shape)
+    
     return background_fraction
 
+def compare_membership(shared, edge):
+    # shared is a tuple: (array of coords in maximum resolution, patch size in maximum resolution)
+    
+    cond = (shared[0][:,0] > edge[0]) & (shared[0][:,0] <= (edge[0]+shared[1][0])) & (shared[0][:,1] > edge[1]) & (shared[0][:,1] <= (edge[1]+shared[1][1]))
+
+    return np.any(cond)
 
 def tile_membership_contour(shared, edge):
     # shared is a tuple: (patch_size, remove_BG, contours_idx_within_ROI, df, coords).
@@ -234,6 +240,7 @@ class Preprocessor:
         with WorkerPool(n_jobs=10, start_method='fork') as pool:
             pool.set_shared_objects(shared)
             results = pool.map(tile_membership_contour, list(edges_to_test), progress_bar=False)
+
         isInROI = np.asarray(results)
         df_export = pd.DataFrame({'coords_x': edges_to_test[isInROI,0], 'coords_y': edges_to_test[isInROI,1], 'tissue_type': row['ROIName']})
         return df_export
@@ -260,17 +267,57 @@ class Preprocessor:
         print(df_final.shape)
         return df
 
-    def getAllTiles(self, dataset):
+    def getAllTiles(self, dataset, background_fraction_threshold=0):
 
         df = pd.DataFrame()
         for idx, row in dataset.iterrows():
-
+            print(idx,row)
             WSI_object = openslide.open_slide(row['SVS_PATH'])
+
+            # lowest zoom level edges (assuming processing is done with visibility 0)
             edges_to_test = lims_to_vec(xmin=0, xmax=WSI_object.level_dimensions[0][0], ymin=0,
                                         ymax=WSI_object.level_dimensions[0][1],
                                         patch_size=self.patch_size)
-            cur_dataset = pd.DataFrame({'coords_x': edges_to_test[:, 0], 'coords_y': edges_to_test[:, 1]})
+
+            # ------------------------------------------------------------------------
+            # remove background in //
+            # This is done on the highest zoom level images to accelerate the process.
+            downsample_factor = int(WSI_object.level_downsamples[-1]) # Factor to match high zoom patches coords to low zoom
+            high_zoom_patch_size = tuple(np.array(np.array(self.patch_size) / downsample_factor).astype(int))  # Size of patches in high zoom
+            high_zoom_vis = WSI_object.level_count - 1  # visiblity of highest zoom level
+
+            # Compute tile locations for the highest zoom level images
+            high_zoom_edges_to_test = lims_to_vec(xmin=0, xmax=WSI_object.level_dimensions[-1][0], ymin=0,
+                                        ymax=WSI_object.level_dimensions[-1][1],
+                                        patch_size=high_zoom_patch_size)
+
+
+            # background threshold is hard coded to 245 (/255) to be highly specific (only remove bg that we are certain)
+            shared = (WSI_object, high_zoom_patch_size, high_zoom_vis, 245)
+            with WorkerPool(n_jobs=60, start_method='fork') as pool:
+                pool.set_shared_objects(shared)
+                results = pool.map(patch_background_fraction,
+                                   list(downsample_factor * high_zoom_edges_to_test),  
+                                   progress_bar=False)
+                # (!) Need to multiply high_zoom_edges_to_test by downsample_factor because openslide uses the lowest zoom coordinates for locations.
+            
+            # Extract the non-background edges and scale them to match the lowest zoom level.
+            estimated_low_zoom_non_background_edges = downsample_factor * high_zoom_edges_to_test[np.array(results) < background_fraction_threshold, :]
+
+            shared = (estimated_low_zoom_non_background_edges, self.patch_size)
+            with WorkerPool(n_jobs=60, start_method='fork') as pool:
+                pool.set_shared_objects(shared)
+                results = pool.map(compare_membership, list(edges_to_test), progress_bar = False)
+
+            edges_wo_background = edges_to_test[np.array(results).astype(bool), :]
+            # ------------------------------------------------------------------------
+
+            print('Total tiles: {}, total tiles without auto-removed background: {}'.format(len(edges_to_test),len(edges_wo_background)))
+            
+            cur_dataset = pd.DataFrame({'coords_x': edges_wo_background[:, 0], 'coords_y': edges_wo_background[:, 1]})
+            
             cur_dataset['id_external'] = row['id_external']
+            cur_dataset['SVS_PATH']    = row['SVS_PATH']            
             df = pd.concat([df, cur_dataset], ignore_index=True)
 
         print('--------------------------------------------------------------------------------')

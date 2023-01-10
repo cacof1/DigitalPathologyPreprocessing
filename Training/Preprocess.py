@@ -41,7 +41,9 @@ tile_dataset.loc[ tile_dataset['tissue_type'].str.contains('Artifact'),'tissue_t
 tile_dataset.loc[ tile_dataset['tissue_type'].str.contains('Muscle'),'tissue_type'] = 'Muscle'
 
 config['DATA']['N_Classes'] = len(tile_dataset[config['DATA']['Label']].unique())
-print(tile_dataset)
+print(tile_dataset, config['DATA']['N_Classes'])
+
+print(tile_dataset['tissue_type'].value_counts())
 
 # Set up logging, model checkpoint
 name = GetInfo.format_model_name(config)
@@ -50,15 +52,12 @@ if 'logger_folder' in config['CHECKPOINT']:
 else:
     logger = TensorBoardLogger('lightning_logs', name=name)
 
-
-
 ########################################################################################################################
 # 4. Model
 lr_monitor = LearningRateMonitor(logging_interval='step')
-checkpoint_callback = ModelCheckpoint(dirpath=config['CHECKPOINT']['Model_Save_Path'],
+checkpoint_callback = ModelCheckpoint(dirpath=logger.log_dir,
                                       monitor=config['CHECKPOINT']['Monitor'],
-                                      filename=name + '-epoch{epoch:02d}-' + config['CHECKPOINT']['Monitor'] + '{' +
-                                      config['CHECKPOINT']['Monitor'] + ':.2f}',
+                                      filename='checkpoint-epoch{epoch:02d}-' + config['CHECKPOINT']['Monitor'] + '{' + config['CHECKPOINT']['Monitor'] + ':.2f}', 
                                       save_top_k=1,
                                       mode=config['CHECKPOINT']['Mode'])
 
@@ -96,8 +95,7 @@ label_encoder.fit(tile_dataset[config['DATA']['Label']])
 # Load model and train
 print("N GPUs: ",torch.cuda.device_count())
 trainer = pl.Trainer(gpus=torch.cuda.device_count(),  # could go into config file
-                     strategy='ddp',
-                     #strategy='horovod',
+                     strategy='bagua',
                      benchmark=True,
                      max_epochs=config['ADVANCEDMODEL']['Max_Epochs'],
                      precision=config['BASEMODEL']['Precision'],

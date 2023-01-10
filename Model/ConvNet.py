@@ -14,7 +14,7 @@ class ConvNet(pl.LightningModule):
     def __init__(self, config, label_encoder=None):
         super().__init__()
 
-        self.save_hyperparameters()  # will save the hyperparameters that come as an input.
+        self.save_hyperparameters(ignore=["train_dataset", "validation_dataset", "test_dataset"])  # will save the hyperparameters that come as an input.
         self.config = config
 
         self.backbone = getattr(models, config['BASEMODEL']['Backbone'])
@@ -45,20 +45,20 @@ class ConvNet(pl.LightningModule):
 
     def training_step(self, train_batch, batch_idx):
         image, labels = train_batch
-        logits = self.forward(image)
-        loss = self.loss_fcn(logits, labels)
-        preds = torch.argmax(softmax(logits, dim=1), dim=1)
-        acc = accuracy(preds, labels)
+        logits        = self.forward(image)
+        loss          = self.loss_fcn(logits, labels)
+        preds         = torch.argmax(logits, dim=1)
+        acc           = accuracy(preds, labels)
         self.log('train_loss', loss, on_step=True, on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
         self.log('train_acc', acc, on_step=True, on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
         return loss
 
     def validation_step(self, val_batch, batch_idx):
         image, labels = val_batch
-        logits = self.forward(image)
-        loss = self.loss_fcn(logits, labels)
-        preds = torch.argmax(softmax(logits, dim=1), dim=1)
-        acc = accuracy(preds, labels)
+        logits        = self.forward(image)
+        loss          = self.loss_fcn(logits, labels)
+        preds         = torch.argmax(logits, dim=1)
+        acc           = accuracy(preds, labels)
         self.log('val_loss', loss, on_step=True, on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
         self.log('val_acc', acc, on_step=True, on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
         return loss
@@ -89,9 +89,9 @@ class ConvNet(pl.LightningModule):
         plt.title("Class :"+Class)
         plt.savefig(self.logger.log_dir+"/ROC.png")
         np.save(self.logger.log_dir+"/ROC.npy",out_dict)
-    def predict_step(self, batch, batch_idx, dataloader_idx=0):
 
-        image = batch
+    def predict_step(self, batch, batch_idx, dataloader_idx=0):
+        image  = batch
         output = softmax(self(image), dim=1)
         return self.all_gather(output)
 
