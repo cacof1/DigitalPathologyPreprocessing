@@ -11,6 +11,7 @@ from Utils.OmeroTools import *
 from pathlib import Path
 from QA.StainNormalization import ColourNorm
 from Utils import npyExportTools
+from PIL import Image
 
 class DataGenerator(torch.utils.data.Dataset):
 
@@ -33,7 +34,14 @@ class DataGenerator(torch.utils.data.Dataset):
         # load image
         svs_path = self.tile_dataset['SVS_PATH'].iloc[id]
         svs_file = openslide.open_slide(svs_path)
-        data     = np.array(svs_file.read_region([self.tile_dataset["coords_x"].iloc[id], self.tile_dataset["coords_y"].iloc[id]], self.vis, self.dim).convert("RGB"))    
+
+        # Todo: uniformise with DigitalPathologyAI framework. This is old and has not been changed recently.
+        try:
+            data = np.array(svs_file.read_region([self.tile_dataset["coords_x"].iloc[id], self.tile_dataset["coords_y"].iloc[id]], self.vis, self.dim).convert("RGB"))    
+        except Exception as e:
+            print("An error '{}' occurred with SVS '{}'; replacing patch by zeroes.".format(e, svs_path))
+            data = Image.new('RGB', self.dim, (0, 0, 0))
+        
         for transform_step in self.transform.transforms:
             if(isinstance(transform_step,ColourNorm.Macenko)):
                 HE, maxC = ColourNorm.Macenko().find_HE(data, get_maxC=True)
@@ -114,13 +122,13 @@ class DataModule(LightningDataModule):
         self.test_data  = DataGenerator(tile_dataset_test , transform=val_transform  , target=target, **kwargs)        
         
     def train_dataloader(self):
-        return DataLoader(self.train_data, batch_size=self.batch_size, num_workers=60, pin_memory=True, shuffle=True)
+        return DataLoader(self.train_data, batch_size=self.batch_size, num_workers=24, pin_memory=True, shuffle=True)
 
     def val_dataloader(self):
-        return DataLoader(self.val_data, batch_size=self.batch_size, num_workers=60, pin_memory=True)
+        return DataLoader(self.val_data, batch_size=self.batch_size, num_workers=24, pin_memory=True)
 
     def test_dataloader(self):
-        return DataLoader(self.test_data, batch_size=self.batch_size, num_workers=60, pin_memory=True)
+        return DataLoader(self.test_data, batch_size=self.batch_size, num_workers=24, pin_memory=True)
 
 def LoadFileParameter(config, dataset):
 
@@ -225,15 +233,16 @@ def QueryImageFromCriteria(config, **kwargs):
         result  = conn.getQueryService().projection(query, params, {"omero.group": "-1"})
 
         df_criteria = pd.DataFrame()
-        for row in result: ## Transform the results into a panda dataframe for each found match
-            temp = pd.DataFrame([[row[0].val, Path(row[1].val).stem, row[2].val, *row[3].val.getMapValueAsMap().values()]],
-                                columns=["id_omero", "id_external", "Size", *row[3].val.getMapValueAsMap().keys()])
-            df_criteria = pd.concat([df_criteria, temp])
-        
-        df_criteria['SVS_PATH'] = [os.path.join(config['DATA']['SVS_Folder'], image_id+'.svs') for image_id in df_criteria['id_external']]
-        df_criteria['NPY_PATH'] = [os.path.join(config['DATA']['SVS_Folder'], 'patches', image_id + '.npy') for image_id in df_criteria['id_external']]
+        if len(result)>0:
+            for row in result: ## Transform the results into a panda dataframe for each found match
+                temp = pd.DataFrame([[row[0].val, Path(row[1].val).stem, row[2].val, *row[3].val.getMapValueAsMap().values()]],
+                                    columns=["id_omero", "id_external", "Size", *row[3].val.getMapValueAsMap().keys()])
+                df_criteria = pd.concat([df_criteria, temp])
+            
+            df_criteria['SVS_PATH'] = [os.path.join(config['DATA']['SVS_Folder'], image_id+'.svs') for image_id in df_criteria['id_external']]
+            df_criteria['NPY_PATH'] = [os.path.join(config['DATA']['SVS_Folder'], 'patches', image_id + '.npy') for image_id in df_criteria['id_external']]
 
-        df = pd.concat([df, df_criteria])
+            df = pd.concat([df, df_criteria])
 
     conn.close()
     return df

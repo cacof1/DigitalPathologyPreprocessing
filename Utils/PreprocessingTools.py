@@ -267,7 +267,7 @@ class Preprocessor:
         print(df_final.shape)
         return df
 
-    def getAllTiles(self, dataset, background_fraction_threshold=0):
+    def getAllTiles(self, dataset, background_fraction_threshold=0.7):
 
         df = pd.DataFrame()
         for idx, row in dataset.iterrows():
